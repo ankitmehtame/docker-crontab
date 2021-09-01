@@ -45,7 +45,7 @@ jobs:
           docker_repo: ${{ secrets.DOCKER_REPO }}
         run: |
           echo "docker_repo = ${env.docker_repo}"
-          echo "tag=${env.docker_repo}/crontab:${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+          echo "tag=${{env.docker_repo}}/crontab:${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
 
       - if: startsWith(github.ref, 'refs/heads/')
         name: Conditional(Set tag as `{version}`)
@@ -53,7 +53,7 @@ jobs:
           docker_repo: ${{ secrets.DOCKER_REPO }}
         run: |
           echo "docker_repo = ${env.docker_repo}"
-          echo "tag=${env.docker_repo}/crontab:${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+          echo "tag=${{env.docker_repo}}/crontab:${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
 
       -
         name: Build and push
