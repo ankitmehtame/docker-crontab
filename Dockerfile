@@ -1,4 +1,4 @@
-FROM alpine:3.12 as rq-build
+FROM alpine:3.17 as rq-build
 
 ENV RQ_VERSION=1.0.2
 WORKDIR /root/
@@ -16,6 +16,7 @@ ENV HOME_DIR=/opt/crontab
 ENV TZ=${TZ:-UTC}
 RUN apk add --no-cache --virtual .run-deps gettext jq bash tini \
     && apk add curl \
+    && apk add knot-utils \
     && apk add bind-tools \
     && mkdir -p ${HOME_DIR}/jobs ${HOME_DIR}/projects \
     && adduser -S docker -D \
