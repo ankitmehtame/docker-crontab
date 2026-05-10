@@ -31,11 +31,11 @@ sleep 2
 printf 'Building image %s...\n' "$IMAGE"
 docker build -t "$IMAGE" .
 
-# Run container in background with sample config mounted
+# Run container in background with sample config mounted AND docker socket mounted
 printf 'Running container with config...\n'
 CONFIG_FILE_HOST=$(pwd)/config-samples/config.sample.json
 CONFIG_FILE_CONTAINER=/opt/crontab/config.json
-docker run -d --name cron-test --cap-add SYS_ADMIN --cap-add SYS_TIME -v "${CONFIG_FILE_HOST}:${CONFIG_FILE_CONTAINER}" "$IMAGE"
+docker run -d --name cron-test --cap-add SYS_ADMIN --cap-add SYS_TIME -v "${CONFIG_FILE_HOST}:${CONFIG_FILE_CONTAINER}" -v /var/run/docker.sock:/var/run/docker.sock "$IMAGE"
 
 # Wait for container to be Running (60s max)
 waited=0
@@ -118,7 +118,6 @@ else
         # For now, we focus on command presence.
     done <<< "$EXPECTED_JOBS"
 fi
-
 
 if [ "$JOB_CHECK_PASSED" = false ]; then
   echo "Cron job verification failed. Some expected jobs or crond loading issue."
