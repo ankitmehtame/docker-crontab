@@ -84,46 +84,40 @@ fi
 
 # Verify cron jobs are loaded from config
 echo "Verifying cron jobs by listing crontab entries..."
-EXPECTED_JOBS=$(jq -c '.[] | "(.schedule // "schedule") .schedule (.command // "command")"' /Users/ankit/dev/docker-crontab/config-samples/config.sample.json)
+# Extract just the commands for checking presence in crontab output
+EXPECTED_COMMANDS=$(jq -c '.[] | .command' /Users/ankit/dev/docker-crontab/config-samples/config.sample.json)
 
 CRON_OUTPUT=$(docker exec cron-test crontab -l || echo "crontab: no crontab for root")
 
-echo "Expected jobs from config (simplified for checking):"
-echo "$EXPECTED_JOBS"
+echo "Expected commands from config:"
+echo "$EXPECTED_JOBS" # This should now be EXPECTED_COMMANDS
 echo ""
 echo "Actual crontab output:"
 echo "$CRON_OUTPUT"
 echo ""
 
-# This is a basic check; a more robust solution would parse both outputs and match precisely
-# For now, we check if key commands/schedules are present in the crontab output
 JOB_CHECK_PASSED=true
 if echo "$CRON_OUTPUT" | grep -q "crontab: no crontab for root"; then
     echo "Error: crontab -l reported no crontab for root, but we expected jobs."
     JOB_CHECK_PASSED=false
 else
-    while IFS= read -r JOB; do
-        SCHEDULE=$(echo "$JOB" | jq -r '.schedule')
-        COMMAND=$(echo "$JOB" | jq -r '.command')
-
-        # The crontab output format can be different (e.g., '@hourly' vs '0 * * * *')
-        # We'll do a partial check for the command and adjust schedule check if needed
-        if echo "$CRON_OUTPUT" | grep -q "$COMMAND"; then
-            echo "Found job containing command: '$COMMAND'"
+    while IFS= read -r COMMAND; do
+        # Remove quotes from command for a cleaner grep
+        CLEAN_COMMAND=$(echo "$COMMAND" | tr -d '"')
+        if echo "$CRON_OUTPUT" | grep -q "$CLEAN_COMMAND"; then
+            echo "Found job containing command: '$CLEAN_COMMAND'"
         else
-            echo "Missing job command: '$COMMAND'"
+            echo "Missing job command: '$CLEAN_COMMAND'"
             JOB_CHECK_PASSED=false
         fi
-        # A more thorough schedule check would require parsing both formats.
-        # For now, we focus on command presence.
-    done <<< "$EXPECTED_JOBS"
+    done <<< "$EXPECTED_COMMANDS"
 fi
 
 if [ "$JOB_CHECK_PASSED" = false ]; then
   echo "Cron job verification failed. Some expected jobs or crond loading issue."
   exit 1
 else
-  echo "Cron job verification passed. Detected expected jobs (or parts thereof) in crontab."
+  echo "Cron job verification passed. Detected expected job commands in crontab."
 fi
 
 # Cleanup is handled by trap EXIT
