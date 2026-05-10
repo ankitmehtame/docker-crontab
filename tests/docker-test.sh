@@ -61,6 +61,10 @@ if [ "$running" != "true" ]; then
   exit 1
 fi
 
+# Wait additional time for crontab to be built
+echo "Waiting for crontab to be built..."
+sleep 5
+
 # Verify config file exists inside the container
 echo "Verifying config file exists at ${CONFIG_FILE_CONTAINER}..."
 if docker exec cron-test test -f "${CONFIG_FILE_CONTAINER}"; then
@@ -86,34 +90,58 @@ fi
 
 # Verify cron jobs are loaded from config
 echo "Verifying cron jobs by listing crontab entries..."
-# Extract just the commands for checking presence in crontab output
-EXPECTED_COMMANDS=$(jq -r '.[].command' "$REPO_ROOT/config-samples/config.sample.json")
 
-CRON_OUTPUT=$(docker exec cron-test crontab -l || echo "crontab: no crontab for root")
+# Check that 6 crontab entries exist
+CRON_ENTRY_COUNT=$(docker exec cron-test grep -c "^[^#]" /etc/crontabs/docker)
+echo "Found $CRON_ENTRY_COUNT cron entries (excluding comments)"
 
-echo "Expected commands from config:"
-echo "$EXPECTED_COMMANDS"
-echo ""
-echo "Actual crontab output:"
-echo "$CRON_OUTPUT"
-echo ""
+# For debugging, show the crontab content
+echo "Actual crontab output from /etc/crontabs/docker:"
+docker exec cron-test cat /etc/crontabs/docker
 
-JOB_CHECK_PASSED=true
-if echo "$CRON_OUTPUT" | grep -q "crontab: no crontab for root"; then
-    echo "Error: crontab -l reported no crontab for root, but we expected jobs."
-    JOB_CHECK_PASSED=false
+if [ "$CRON_ENTRY_COUNT" -eq 6 ]; then
+  echo "✓ All 6 cron jobs are present in the crontab"
 else
-    while IFS= read -r CMD; do
-        # Remove quotes from command and perform a fixed string grep
-        CLEAN_COMMAND=$(echo "$CMD" | tr -d '"')
-        if echo "$CRON_OUTPUT" | grep -Fq "$CLEAN_COMMAND"; then
-            echo "Found job containing command: '$CLEAN_COMMAND'"
-        else
-            echo "Missing job command: '$CLEAN_COMMAND'"
-            JOB_CHECK_PASSED=false
-        fi
-    done <<< "$EXPECTED_COMMANDS"
+  echo "✗ Expected 6 cron jobs, found $CRON_ENTRY_COUNT"
+  exit 1
 fi
+
+# Verify that wrapper scripts contain the expected commands
+echo ""
+echo "Verifying wrapper scripts contain expected commands..."
+EXPECTED_COMMANDS=$(jq -r '.[].command' "$REPO_ROOT/config-samples/config.sample.json")
+JOB_CHECK_PASSED=true
+
+# Get job and project script contents from the container
+JOB_SCRIPTS=$(docker exec cron-test sh -c 'cat /opt/crontab/jobs/*.sh' 2>/dev/null || true)
+PROJECT_SCRIPTS=$(docker exec cron-test sh -c 'cat /opt/crontab/projects/*.sh' 2>/dev/null || true)
+ALL_SCRIPTS="${JOB_SCRIPTS}${PROJECT_SCRIPTS}"
+
+while IFS= read -r CMD; do
+  # Extract the core command without quotes for easier matching
+  CORE_CMD=$(echo "$CMD" | tr -d "\"")
+
+  # For commands starting with 'sh -c', extract the inner command
+  if echo "$CORE_CMD" | grep -q "^sh -c "; then
+    # Extract command inside sh -c quotes
+    INNER_CMD=$(echo "$CORE_CMD" | sed "s|^sh -c '||;s|'$||")
+    # Search for docker run/exec patterns that contain the inner command
+    if echo "$ALL_SCRIPTS" | grep -qF "$INNER_CMD"; then
+      echo "✓ Found command in script: '$CMD'"
+    else
+      echo "✗ Command not found in scripts: '$CMD'"
+      JOB_CHECK_PASSED=false
+    fi
+  else
+    # For direct commands, search them in the first 4 words (ignoring leading echo)
+    if echo "$ALL_SCRIPTS" | grep -qF "$CORE_CMD"; then
+      echo "✓ Found command in script: '$CMD'"
+    else
+      echo "✗ Command not found in scripts: '$CMD'"
+      JOB_CHECK_PASSED=false
+    fi
+  fi
+done <<< "$EXPECTED_COMMANDS"
 
 if [ "$JOB_CHECK_PASSED" = false ]; then
   echo "Cron job verification failed. Some expected jobs or crond loading issue."

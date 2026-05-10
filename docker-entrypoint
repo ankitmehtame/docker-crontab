@@ -34,23 +34,28 @@ CRONTAB_FILE=/etc/crontabs/docker
 mkdir -p ${HOME_DIR}/jobs ${HOME_DIR}/projects
 
 ensure_docker_socket_accessible() {
-    if ! grep -q "^docker:" /etc/group; then
-        # Ensure 'docker' user has permissions for docker socket (without changing permissions)
-        DOCKER_GID=$(stat -c '%g' ${DOCKER_SOCK})
-        if [ "${DOCKER_GID}" != "0" ]; then
-            if ! grep -qE "^[^:]+:[^:]+:${DOCKER_GID}:" /etc/group; then
-                # No group with such gid exists - create group docker
-                addgroup -g ${DOCKER_GID} docker
-                adduser docker docker
+    # Check if docker socket exists and is accessible
+    if [ -S "${DOCKER_SOCK}" ]; then
+        if ! grep -q "^docker:" /etc/group; then
+            # Ensure 'docker' user has permissions for docker socket (without changing permissions)
+            DOCKER_GID=$(stat -c '%g' ${DOCKER_SOCK} 2>/dev/null || echo "0")
+            if [ "${DOCKER_GID}" != "0" ]; then
+                if ! grep -qE "^[^:]+:[^:]+:${DOCKER_GID}:" /etc/group; then
+                    # No group with such gid exists - create group docker
+                    addgroup -g ${DOCKER_GID} docker 2>/dev/null || true
+                    adduser docker docker 2>/dev/null || true
+                else
+                    # Group with such gid exists - add user "docker" to this group
+                    DOCKER_GROUP_NAME=$(getent group "${DOCKER_GID}" | awk -F':' '{{ print $1 }}' || echo "docker")
+                    adduser docker $DOCKER_GROUP_NAME 2>/dev/null || true
+                fi
             else
-                # Group with such gid exists - add user "docker" to this group
-                DOCKER_GROUP_NAME=`getent group "${DOCKER_GID}" | awk -F':' '{{ print $1 }}'`
-                adduser docker $DOCKER_GROUP_NAME
+                # Docker socket belongs to "root" group - add user "docker" to this group
+                adduser docker root 2>/dev/null || true
             fi
-        else
-            # Docker socket belongs to "root" group - add user "docker" to this group
-            adduser docker root
         fi
+    else
+        echo "Docker socket not found at ${DOCKER_SOCK}, skipping docker group setup"
     fi
 }
 
