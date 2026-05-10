@@ -6,7 +6,8 @@ ENV TZ=${TZ}
 ENV RQ_VERSION=1.0.2
 WORKDIR /root/
 
-RUN apk --update add upx \
+RUN apk update \
+    && apk add --no-cache upx \
     && wget https://github.com/dflemstr/rq/releases/download/v${RQ_VERSION}/rq-v${RQ_VERSION}-x86_64-unknown-linux-musl.tar.gz \
     && tar -xvf rq-v1.0.2-x86_64-unknown-linux-musl.tar.gz \
     && upx --brute rq
@@ -17,7 +18,8 @@ COPY --from=rq-build /root/rq /usr/local/bin
 
 ENV HOME_DIR=/opt/crontab
 RUN apk add --no-cache --virtual .run-deps gettext jq bash tini curl knot-utils bind-tools tzdata \
-    && adduser -D appuser \
+    && mkdir -p ${HOME_DIR} \
+    && adduser -D -h ${HOME_DIR} appuser \
     && chown -R appuser:appuser ${HOME_DIR} \
     && cp -r -f /usr/share/zoneinfo/${TZ} /etc/localtime
 
