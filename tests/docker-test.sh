@@ -33,7 +33,9 @@ docker build -t "$IMAGE" .
 
 # Run container in background with sample config mounted AND docker socket mounted
 printf 'Running container with config...\n'
-CONFIG_FILE_HOST=$(pwd)/config-samples/config.sample.json
+# Determine repository root dynamically
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CONFIG_FILE_HOST="$REPO_ROOT/config-samples/config.sample.json"
 CONFIG_FILE_CONTAINER=/opt/crontab/config.json
 docker run -d --name cron-test --cap-add SYS_ADMIN --cap-add SYS_TIME -v "${CONFIG_FILE_HOST}:${CONFIG_FILE_CONTAINER}" -v /var/run/docker.sock:/var/run/docker.sock "$IMAGE"
 
@@ -85,12 +87,12 @@ fi
 # Verify cron jobs are loaded from config
 echo "Verifying cron jobs by listing crontab entries..."
 # Extract just the commands for checking presence in crontab output
-EXPECTED_COMMANDS=$(jq -c '.[] | .command' /Users/ankit/dev/docker-crontab/config-samples/config.sample.json)
+EXPECTED_COMMANDS=$(jq -r '.[].command' "$REPO_ROOT/config-samples/config.sample.json")
 
 CRON_OUTPUT=$(docker exec cron-test crontab -l || echo "crontab: no crontab for root")
 
 echo "Expected commands from config:"
-echo "$EXPECTED_JOBS" # This should now be EXPECTED_COMMANDS
+echo "$EXPECTED_COMMANDS"
 echo ""
 echo "Actual crontab output:"
 echo "$CRON_OUTPUT"
@@ -101,10 +103,10 @@ if echo "$CRON_OUTPUT" | grep -q "crontab: no crontab for root"; then
     echo "Error: crontab -l reported no crontab for root, but we expected jobs."
     JOB_CHECK_PASSED=false
 else
-    while IFS= read -r COMMAND; do
+    while IFS= read -r CMD; do
         # Remove quotes from command for a cleaner grep
-        CLEAN_COMMAND=$(echo "$COMMAND" | tr -d '"')
-        if echo "$CRON_OUTPUT" | grep -q "$CLEAN_COMMAND"; then
+        CLEAN_COMMAND=$(echo "$CMD" | tr -d '"')
+        if echo "$CRON_OUTPUT" | grep -Fq "$CLEAN_COMMAND"; then
             echo "Found job containing command: '$CLEAN_COMMAND'"
         else
             echo "Missing job command: '$CLEAN_COMMAND'"
