@@ -33,7 +33,7 @@ docker build -t "$IMAGE" .
 
 # Run container in background with sample config mounted AND docker socket mounted
 printf 'Running container with config...\n'
-# Determine repository root dynamically
+# Determine repository root dynamically to make path resolvable in CI
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIG_FILE_HOST="$REPO_ROOT/config-samples/config.sample.json"
 CONFIG_FILE_CONTAINER=/opt/crontab/config.json
@@ -104,7 +104,7 @@ if echo "$CRON_OUTPUT" | grep -q "crontab: no crontab for root"; then
     JOB_CHECK_PASSED=false
 else
     while IFS= read -r CMD; do
-        # Remove quotes from command for a cleaner grep
+        # Remove quotes from command and perform a fixed string grep
         CLEAN_COMMAND=$(echo "$CMD" | tr -d '"')
         if echo "$CRON_OUTPUT" | grep -Fq "$CLEAN_COMMAND"; then
             echo "Found job containing command: '$CLEAN_COMMAND'"
