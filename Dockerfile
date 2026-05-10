@@ -1,4 +1,7 @@
-FROM alpine:3.17 as rq-build
+FROM alpine:latest AS rq-build
+
+ARG TZ=UTC
+ENV TZ=${TZ}
 
 ENV RQ_VERSION=1.0.2
 WORKDIR /root/
@@ -8,19 +11,14 @@ RUN apk --update add upx \
     && tar -xvf rq-v1.0.2-x86_64-unknown-linux-musl.tar.gz \
     && upx --brute rq
 
-FROM library/docker:stable
+FROM alpine:latest
 
 COPY --from=rq-build /root/rq /usr/local/bin
 
 ENV HOME_DIR=/opt/crontab
-ENV TZ=${TZ:-UTC}
-RUN apk add --no-cache --virtual .run-deps gettext jq bash tini \
-    && apk add curl \
-    && apk add knot-utils \
-    && apk add bind-tools \
-    && mkdir -p ${HOME_DIR}/jobs ${HOME_DIR}/projects \
-    && adduser -S docker -D \
-    && apk add -U tzdata \
+RUN apk add --no-cache --virtual .run-deps gettext jq bash tini curl knot-utils bind-tools tzdata \
+    && adduser -D appuser \
+    && chown -R appuser:appuser ${HOME_DIR} \
     && cp -r -f /usr/share/zoneinfo/${TZ} /etc/localtime
 
 
