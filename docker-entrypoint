@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 set -e
 
-# Export PATH to include common binary locations like /usr/bin where docker is expected
-export PATH=$PATH:/usr/bin
-
 if [ -z "$DOCKER_HOST" -a "$DOCKER_PORT_2375_TCP" ]; then
 		export DOCKER_HOST='tcp://docker:2375'
 fi
@@ -108,18 +105,18 @@ cat << EOF > ${HOME_DIR}/projects/${SCRIPT_NAME}.sh
 #!/usr/bin/env bash
 set -e
 
-# Ensure docker command is in PATH for cron jobs
-export PATH=$PATH:/usr/bin
+# Ensure docker command is in PATH for cron jobs by using its absolute path
+DOCKER_CMD="/usr/bin/docker"
 
 CONTAINERS=\$(docker ps --format '{{.Names}}' | grep -E "^${PROJECT}_${CONTAINER}.[0-9]+")
 for CONTAINER_NAME in \$CONTAINERS; do
-		docker exec ${DOCKERARGS} \${CONTAINER_NAME} ${TMP_COMMAND}
+		${DOCKER_CMD} exec ${DOCKERARGS} \${CONTAINER_NAME} ${TMP_COMMAND}
 done
 EOF
 				echo "/bin/bash ${HOME_DIR}/projects/${SCRIPT_NAME}.sh"
 				# cat "/bin/bash ${HOME_DIR}/projects/${SCRIPT_NAME}.sh"
 		else
-				echo "docker exec ${DOCKERARGS} ${CONTAINER} ${TMP_COMMAND}"
+				echo "${DOCKER_CMD} exec ${DOCKERARGS} ${CONTAINER} ${TMP_COMMAND}"
 		fi
 }
 
