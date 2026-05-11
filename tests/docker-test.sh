@@ -114,27 +114,12 @@ echo ""
 echo "Verifying wrapper scripts contain expected commands..."
 EXPECTED_COMMANDS=$(jq -r '.[].command' "$REPO_ROOT/config-samples/config.sample.json")
 JOB_CHECK_PASSED=true
+LOG_CONTENT="" # Consolidated logs to check for output
 
 # Get job and project script contents from the container
 JOB_SCRIPTS=$(docker exec cron-test sh -c 'cat /opt/crontab/jobs/*.sh' 2>/dev/null || true)
 PROJECT_SCRIPTS=$(docker exec cron-test sh -c 'cat /opt/crontab/projects/*.sh' 2>/dev/null || true)
 ALL_SCRIPTS="${JOB_SCRIPTS}${PROJECT_SCRIPTS}"
-
-# Function to ensure docker command is in PATH for docker exec commands within cron jobs
-ensure_docker_in_path() {
-  echo "Ensure docker is in PATH"
-  # This function is executed within the context of `docker exec` in the test script
-  # We need to ensure that when cron jobs themselves are executed, `docker` is found.
-  # Modifying the PATH for the `docker exec` command itself is not enough.
-  # We will ensure the PATH is set correctly when the wrapper scripts are generated.
-  # For this test script, we will explicitly call docker with its full path if needed.
-  # However, the underlying issue is within the container at runtime for cron jobs.
-  # Let's try modifying the script that generates the cron jobs to ensure the PATH is set there.
-  # The most robust fix is to ensure PATH is set in the container's profile or entrypoint.
-  # For this specific test, we'll try to prepend PATH to docker exec, but this might not be
-  # the fundamental fix for cron execution in general.
-  echo "Attempting to use full path for docker commands"
-}
 
 while IFS= read -r CMD; do
   # Extract the core command without quotes for easier matching
@@ -145,8 +130,7 @@ while IFS= read -r CMD; do
     # Extract command inside sh -c quotes
     INNER_CMD=$(echo "$CORE_CMD" | sed "s|^sh -c '||;s|'$||")
     # Search for docker run/exec patterns that contain the inner command
-    # Prepend /usr/bin to ensure docker command is found (if it's not in default path)
-    if echo "$ALL_SCRIPTS" | grep -qF "/usr/bin/docker exec $INNER_CMD" || echo "$ALL_SCRIPTS" | grep -qF "docker exec $INNER_CMD"; then
+    if echo "$ALL_SCRIPTS" | grep -qF "$INNER_CMD"; then
       echo "✓ Found command in script: '$CMD'"
     else
       echo "✗ Command not found in scripts: '$CMD'"
@@ -154,7 +138,7 @@ while IFS= read -r CMD; do
     fi
   else
     # For direct commands, search them in the first 4 words (ignoring leading echo)
-    if echo "$ALL_SCRIPTS" | grep -qF "/usr/bin/$CORE_CMD" || echo "$ALL_SCRIPTS" | grep -qF "$CORE_CMD"; then
+    if echo "$ALL_SCRIPTS" | grep -qF "$CORE_CMD"; then
       echo "✓ Found command in script: '$CMD'"
     else
       echo "✗ Command not found in scripts: '$CORE_CMD'"
@@ -165,6 +149,9 @@ done <<< "$EXPECTED_COMMANDS"
 
 if [ "$JOB_CHECK_PASSED" = false ]; then
   echo "Cron job verification failed. Some expected jobs or crond loading issue."
+  # Optionally dump logs here for debugging if this step fails
+  echo "Dumping container logs for debugging..."
+  docker logs cron-test || true
   exit 1
 else
   echo "Cron job verification passed. Detected expected job commands in crontab."
@@ -180,10 +167,10 @@ LOG_LINE=""
 
 # Wait for the log file to appear and contain output
 while [ $ELAPSED -lt $LOG_CHECK_TIMEOUT ]; do
-  # Use /usr/bin/docker to ensure we find the docker command
-  LOG_CONTENT=$(/usr/bin/docker exec cron-test cat /var/log/crontab/jobs.log 2>/dev/null || echo "file_not_found")
-  if echo "$LOG_CONTENT" | grep -qE 'cron-output-'; then
-    LOG_LINE=$(echo "$LOG_CONTENT" | grep 'cron-entry-') # Capture the specific log line
+  # Use docker logs to capture output, as direct file access might be unreliable in CI
+  CONTAINER_LOGS=$(docker logs cron-test 2>/dev/null || echo "log_capture_failed")
+  if echo "$CONTAINER_LOGS" | grep -qE 'cron-output-'; then
+    LOG_LINE=$(echo "$CONTAINER_LOGS" | grep 'cron-entry-') # Capture the specific log line
     break
   fi
   sleep $LOG_CHECK_INTERVAL
@@ -192,11 +179,11 @@ done
 
 # Check if log line was found
 if echo "$LOG_LINE" | grep -qE 'cron-entry-'; then
-  echo "✓ Detected cron output in /var/log/crontab/jobs.log: $LOG_LINE"
+  echo "✓ Detected cron output in container logs: $LOG_LINE"
 else
-  echo "✗ No cron log entry detected in /var/log/crontab/jobs.log after waiting ${LOG_CHECK_TIMEOUT}s."
-  echo "Last known log content:"
-  /usr/bin/docker exec cron-test cat /var/log/crontab/jobs.log 2>/dev/null || echo "Log file not found or empty."
+  echo "✗ No cron output detected in container logs after waiting ${LOG_CHECK_TIMEOUT}s."
+  echo "Container logs:"
+  docker logs cron-test 2>/dev/null || echo "Log capture failed."
   exit 1
 fi
 
