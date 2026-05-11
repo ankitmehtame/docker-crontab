@@ -105,7 +105,7 @@ cat << EOF > ${HOME_DIR}/projects/${SCRIPT_NAME}.sh
 #!/usr/bin/env bash
 set -e
 
-# Ensure docker command is in PATH
+# Ensure docker command is in PATH for cron jobs
 export PATH=$PATH:/usr/bin
 
 CONTAINERS=\$(docker ps --format '{{.Names}}' | grep -E "^${PROJECT}_${CONTAINER}.[0-9]+")
@@ -222,7 +222,9 @@ cat << EOF > ${HOME_DIR}/jobs/${SCRIPT_NAME}.sh
 #!/usr/bin/env bash
 set -e
 
-# Uncomment the following lines to redirect stdout/stderr to a log file
+# Ensure docker command is in PATH for cron jobs
+export PATH=$PATH:/usr/bin
+
 UUID=\$(cat /proc/sys/kernel/random/uuid)
 exec > >(tee -a ${LOG_FILE})
 exec 2> >(tee -a ${LOG_FILE} >&2)
