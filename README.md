@@ -1,13 +1,11 @@
 # docker-crontab
-
-A simple wrapper over `docker` to all complex cron job to be run in other containers.
+A lightweight, secure cron wrapper for Docker that easily schedules and executes complex jobs across your containers. It natively streams cron logs to `docker logs` and supports advanced container triggers using JSON, TOML, or YAML configurations.
 
 ## Supported tags and Dockerfile links
 
 -	[`latest` (*Dockerfile*)](https://github.com/ankitmehtame/docker-crontab/blob/main/Dockerfile)
 
-![Docker Pulls](https://img.shields.io/docker/pulls/ghcr.io/ankitmehtame/crontab?style=flat-square)
-
+![CI](https://github.com/ankitmehtame/docker-crontab/actions/workflows/build.yml/badge.svg)
 
 ## Features
 - Easy to read schedule syntax allowed.
