@@ -8,16 +8,36 @@ else
   echo "Docker socket /var/run/docker.sock not found; using default Docker host"
 fi
 
-IMAGE_TAG=${1:-docker-crontab-test}
-IMAGE=${IMAGE_TAG}
+# Determine repository root dynamically FIRST, as it's used by subsequent logic
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-MINIMAL_CONFIG_FLAG=$2 # Check if --minimal flag is passed
+IMAGE_TAG=${1:-docker-crontab-test}
+if [ "$#" -gt 0 ]; then shift; fi # Remove IMAGE_TAG from arguments, process the rest
+CONFIG_ARG=""
+CONFIG_FILE_HOST="$REPO_ROOT/config-samples/config.sample.json" # Default config
+
+# Parse remaining arguments for flags
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        --minimal)
+            CONFIG_ARG="$1" # Store the flag
+            CONFIG_FILE_HOST="$REPO_ROOT/config-samples/config.minimal.json"
+            echo "Using minimal config: $CONFIG_FILE_HOST"
+            shift # past argument
+            ;;
+        *)    # unknown option
+            echo "Unknown parameter passed: $1"
+            exit 1
+            ;;
+    esac
+done
+
 
 cleanup() {
   echo 'Cleaning up...'
   # Ensure container is removed even if it failed to start or is stuck
   docker rm -f cron-test >/dev/null 2>&1 || true
-  docker rmi "$IMAGE" >/dev/null 2>&1 || true
+  docker rmi "$IMAGE_TAG" >/dev/null 2>&1 || true
   echo 'Cleanup complete.'
 }
 
@@ -30,26 +50,17 @@ docker rm -f cron-test >/dev/null 2>&1 || true
 sleep 2
 
 # Build image
-printf 'Building image %s...\n' "$IMAGE"
-docker build -t "$IMAGE" .
+printf 'Building image %s...\n' "$IMAGE_TAG"
+docker build -t "$IMAGE_TAG" .
 
 # Run container
 printf 'Running container with config...\n'
-# Determine repository root dynamically to make path resolvable in CI
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CONFIG_FILE_HOST="$REPO_ROOT/config-samples/config.sample.json"
 CONFIG_FILE_CONTAINER=/opt/crontab/config.json
+
+# Default docker run command
 DOCKER_RUN_CMD="docker run -d --name cron-test --cap-add SYS_ADMIN --cap-add SYS_TIME"
 
-# Use minimal config if flag is set
-if [ "$MINIMAL_CONFIG_FLAG" = "--minimal" ]; then
-  CONFIG_FILE_HOST="$REPO_ROOT/config-samples/config.minimal.json"
-  CONFIG_FILE_CONTAINER=/opt/crontab/config.json # Still mount to the same place inside container
-  # Override CMD to run crond directly and ensure stdout is captured
-  DOCKER_RUN_CMD="docker run --name cron-test --cap-add SYS_ADMIN --cap-add SYS_TIME -v ${CONFIG_FILE_HOST}:${CONFIG_FILE_CONTAINER}"
-fi
-
-$DOCKER_RUN_CMD -v "${CONFIG_FILE_HOST}:${CONFIG_FILE_CONTAINER}" -v /var/run/docker.sock:/var/run/docker.sock "$IMAGE"
+$DOCKER_RUN_CMD -v "${CONFIG_FILE_HOST}:${CONFIG_FILE_CONTAINER}" -v /var/run/docker.sock:/var/run/docker.sock "$IMAGE_TAG"
 
 # Wait for container to be Running (60s max)
 waited=0
@@ -104,10 +115,7 @@ fi
 echo "Verifying cron jobs by listing crontab entries..."
 
 # Determine expected number of cron jobs from config
-EXPECTED_CRON_JOBS=$(jq -r '. | length' "$REPO_ROOT/config-samples/config.sample.json")
-if [ "$MINIMAL_CONFIG_FLAG" = "--minimal" ]; then
-  EXPECTED_CRON_JOBS=$(jq -r '. | length' "$REPO_ROOT/config-samples/config.minimal.json")
-fi
+EXPECTED_CRON_JOBS=$(jq -r '. | length' "$CONFIG_FILE_HOST")
 
 # Check that the expected number of crontab entries exist (excluding comments)
 CRON_ENTRY_COUNT=$(docker exec cron-test grep -c "^[^#]" /etc/crontabs/docker)
@@ -170,7 +178,7 @@ else
   echo "Cron job verification passed. Detected expected job commands in crontab."
 fi
 
-# Extra concrete verification: ensure the test log write cron actually executed at least once via log file...
+# Extra concrete verification: ensure the test log write cron actually executed at least once via container logs...
 echo ""
 echo "Verifying that the test log write cron actually executed at least once via container logs..."
 LOG_CHECK_TIMEOUT=120 # Increased timeout to ensure cron has time to run and its output is captured
@@ -182,7 +190,7 @@ LOG_LINE=""
 while [ $ELAPSED -lt $LOG_CHECK_TIMEOUT ]; do
   CONTAINER_LOGS=$(docker logs cron-test 2>/dev/null || echo "log_capture_failed")
   if echo "$CONTAINER_LOGS" | grep -qE 'cron-output-'; then
-    LOG_LINE=$(echo "$CONTAINER_LOGS" | grep 'cron-entry-') # Capture the specific log line
+    LOG_LINE=$(echo "$CONTAINER_LOGS" | grep 'cron-output-') # Capture the specific log line
     break
   fi
   sleep $LOG_CHECK_INTERVAL
@@ -190,7 +198,7 @@ while [ $ELAPSED -lt $LOG_CHECK_TIMEOUT ]; do
 done
 
 # Check if log line was found
-if echo "$LOG_LINE" | grep -qE 'cron-entry-'; then
+if echo "$LOG_LINE" | grep -qE 'cron-output-'; then
   echo "✓ Detected cron output in container logs: $LOG_LINE"
 else
   echo "✗ No cron output detected in container logs after waiting ${LOG_CHECK_TIMEOUT}s."
@@ -198,5 +206,3 @@ else
   docker logs cron-test 2>/dev/null || echo "Log capture failed."
   exit 1
 fi
-
-# Cleanup is handled by trap EXIT

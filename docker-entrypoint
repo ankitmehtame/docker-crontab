@@ -270,6 +270,7 @@ EOF
 ensure_docker_socket_accessible
 
 start_app() {
+		chmod 666 /proc/1/fd/1 /proc/1/fd/2 2>/dev/null || true
 		get_config
 		if [ -f "${HOME_DIR}/config.working.json" ]; then
 				export CONFIG=${HOME_DIR}/config.working.json
@@ -284,6 +285,7 @@ start_app() {
 				else
 						echo "Unable to find ${CONFIG}"
 				fi
+				tail -f ${LOG_FILE} &
 		fi
 		echo "$@"
 		exec "$@"
