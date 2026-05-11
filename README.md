@@ -4,15 +4,10 @@ A simple wrapper over `docker` to all complex cron job to be run in other contai
 
 ## Supported tags and Dockerfile links
 
--	[`latest` (*Dockerfile*)](https://github.com/willfarrell/docker-crontab/blob/master/Dockerfile)
--	[`1.0.0` (*Dockerfile*)](https://github.com/willfarrell/docker-crontab/blob/1.0.0/Dockerfile)
--	[`0.6.0` (*Dockerfile*)](https://github.com/willfarrell/docker-crontab/blob/0.6.0/Dockerfile)
+-	[`latest` (*Dockerfile*)](https://github.com/ankitmehtame/docker-crontab/blob/main/Dockerfile)
 
-![](https://img.shields.io/docker/pulls/willfarrell/crontab "Total docker pulls") [![](https://images.microbadger.com/badges/image/willfarrell/crontab.svg)](http://microbadger.com/images/willfarrell/crontab "Get your own image badge on microbadger.com")
+![Docker Pulls](https://img.shields.io/docker/pulls/ghcr.io/ankitmehtame/crontab?style=flat-square)
 
-## Why?
-Yes, I'm aware of [mcuadros/ofelia](https://github.com/mcuadros/ofelia) (>250MB when this was created), it was the main inspiration for this project. 
-A great project, don't get me wrong. It was just missing certain key enterprise features I felt were required to support where docker is heading.
 
 ## Features
 - Easy to read schedule syntax allowed.
@@ -21,6 +16,10 @@ A great project, don't get me wrong. It was just missing certain key enterprise 
 - Run command in a container using `container`.
 - Run command on a instances of a scaled container using `project`.
 - Ability to trigger scripts in other containers on completion cron job using `trigger`.
+- Supports JSON, TOML, and YAML configurations.
+- Jobs run securely as a non-root user (`docker`).
+- Native stdout logging, meaning all cron outputs stream directly to `docker logs`.
+- Multi-architecture support out of the box (amd64, arm64).
 
 ## Config file
 
@@ -48,7 +47,7 @@ See [`config-samples`](config-samples) for examples.
  	"schedule":"43 6,18 * * *",
  	"command":"sh -c 'dehydrated --cron --out /etc/ssl --domain ${LE_DOMAIN} --challenge dns-01 --hook dehydrated-dns'",
  	"dockerargs":"--env-file /opt/crontab/env/letsencrypt.env -v webapp_nginx_tls_cert:/etc/ssl -v webapp_nginx_acme_challenge:/var/www/.well-known/acme-challenge",
- 	"image":"willfarrell/letsencrypt",
+ 	"image":"certbot/certbot",
  	"trigger":[{
  		"command":"sh -c '/etc/scripts/make_hpkp ${NGINX_DOMAIN} && /usr/sbin/nginx -t && /usr/sbin/nginx -s reload'",
  		"project":"conduit",
@@ -63,13 +62,11 @@ See [`config-samples`](config-samples) for examples.
 ### Command Line
 
 ```bash
-docker build -t crontab .
 docker run -d \
     -v /var/run/docker.sock:/var/run/docker.sock:ro \
     -v ./env:/opt/env:ro \
     -v /path/to/config/dir:/opt/crontab:rw \
-    -v /path/to/logs:/var/log/crontab:rw \
-    crontab
+    ghcr.io/ankitmehtame/crontab:latest
 ```
 
 ### Use with docker-compose
@@ -86,7 +83,7 @@ docker run -d \
 ### Dockerfile
 
 ```Dockerfile
-FROM willfarrell/crontab
+FROM ghcr.io/ankitmehtame/crontab:latest
 
 COPY config.json ${HOME_DIR}/
 
@@ -95,13 +92,13 @@ COPY config.json ${HOME_DIR}/
 ### Logrotate Dockerfile
 
 ```Dockerfile
-FROM willfarrell/crontab
+FROM ghcr.io/ankitmehtame/crontab:latest
 
 RUN apk add --no-cache logrotate
-RUN echo "*/5 *	* * *  /usr/sbin/logrotate /etc/logrotate.conf" >> /etc/crontabs/logrotate
+RUN echo "*/5 *	* * *  /usr/sbin/logrotate /etc/logrotate.conf" >> /etc/crontabs/docker
 COPY logrotate.conf /etc/logrotate.conf
 
-CMD ["crond", "-f"]
+CMD ["crond", "-f", "-d", "6", "-c", "/etc/crontabs"]
 ```
 
 ### Logging - In Dev
@@ -115,5 +112,6 @@ grok: `CRONTABLOG %{DATA:request_id} %{TIMESTAMP_ISO8601:timestamp} \[%{LOGLEVEL
 ## TODO
 - [ ] Have ability to auto regenerate crontab on file change (signal HUP?)
 - [ ] Run commands on host machine (w/ --privileged?)
-- [ ] Write tests
-- [ ] Setup TravisCI
+
+## Credits
+This project was originally created by [willfarrell](https://github.com/willfarrell/docker-crontab) and heavily adapted to support new architectures, features, and non-root execution.
