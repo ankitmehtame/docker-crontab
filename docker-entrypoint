@@ -105,6 +105,9 @@ cat << EOF > ${HOME_DIR}/projects/${SCRIPT_NAME}.sh
 #!/usr/bin/env bash
 set -e
 
+# Ensure docker command is in PATH
+export PATH=$PATH:/usr/bin
+
 CONTAINERS=\$(docker ps --format '{{.Names}}' | grep -E "^${PROJECT}_${CONTAINER}.[0-9]+")
 for CONTAINER_NAME in \$CONTAINERS; do
 		docker exec ${DOCKERARGS} \${CONTAINER_NAME} ${TMP_COMMAND}

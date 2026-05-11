@@ -58,9 +58,9 @@
     "onstart": true
   },
   {
-    "comment": "test log write to stdout",
+    "comment": "test log write to /var/log/crontab/jobs.log and stdout",
     "schedule": "* * * * *",
     "image": "alpine:3.5",
-    "command": "sh -c 'echo cron-output-$(date +%s) > /proc/1/fd/1'"
+    "command": "sh -c 'echo cron-output-$(date +%s) >> /var/log/crontab/jobs.log && echo cron-output-$(date +%s) > /proc/1/fd/1'"
   }
 ]

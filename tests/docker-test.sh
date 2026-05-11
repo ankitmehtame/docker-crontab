@@ -140,7 +140,7 @@ while IFS= read -r CMD; do
     if echo "$ALL_SCRIPTS" | grep -qF "$CORE_CMD"; then
       echo "✓ Found command in script: '$CMD'"
     else
-      echo "✗ Command not found in scripts: '$CMD'"
+      echo "✗ Command not found in scripts: '$CORE_CMD'"
       JOB_CHECK_PASSED=false
     fi
   fi
@@ -155,20 +155,30 @@ fi
 
 # Extra concrete verification: ensure the test log write cron actually executed at least once
 echo ""
-echo "Verifying that the test log write cron actually executed at least once..."
+echo "Verifying that the test log write cron actually executed at least once via log file..."
 LOG_CHECK_TIMEOUT=120 # Increased timeout to ensure cron has time to run and its output is captured
 LOG_CHECK_INTERVAL=5
 ELAPSED=0
 LOG_LINE=""
-# Capture all container logs and grep for the output
-CONTAINER_LOGS=$(docker logs cron-test 2>/dev/null || true)
-LOG_LINE=$(echo "$CONTAINER_LOGS" | grep 'cron-output-')
 
-if echo "$LOG_LINE" | grep -qE 'cron-output-'; then
-  echo "✓ Detected cron output in container logs: $LOG_LINE"
+# Wait for the log file to appear and contain output
+while [ $ELAPSED -lt $LOG_CHECK_TIMEOUT ]; do
+  LOG_CONTENT=$(docker exec cron-test cat /var/log/crontab/jobs.log 2>/dev/null || echo "file_not_found")
+  if echo "$LOG_CONTENT" | grep -qE 'cron-output-'; then
+    LOG_LINE=$(echo "$LOG_CONTENT" | grep 'cron-entry-') # Capture the specific log line
+    break
+  fi
+  sleep $LOG_CHECK_INTERVAL
+  ELAPSED=$((ELAPSED+LOG_CHECK_INTERVAL))
+done
+
+# Check if log line was found
+if echo "$LOG_LINE" | grep -qE 'cron-entry-'; then
+  echo "✓ Detected cron output in /var/log/crontab/jobs.log: $LOG_LINE"
 else
-  echo "✗ No cron output detected in container logs after waiting. Container logs:"
-  echo "$CONTAINER_LOGS"
+  echo "✗ No cron log entry detected in /var/log/crontab/jobs.log after waiting ${LOG_CHECK_TIMEOUT}s."
+  echo "Last known log content:"
+  docker exec cron-test cat /var/log/crontab/jobs.log 2>/dev/null || echo "Log file not found or empty."
   exit 1
 fi
 
