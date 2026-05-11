@@ -1,0 +1,7 @@
+[
+  {
+    "comment": "simple test job",
+    "schedule": "* * * * *",
+    "command": "echo 'cron-simple-test-success'"
+  }
+]
