@@ -16,14 +16,15 @@ COPY --from=rq-build /root/rq /usr/local/bin
 ENV HOME_DIR=/opt/crontab
 ENV TZ=UTC
 
-RUN apk add --no-cache --virtual .run-deps gettext jq bash tini curl knot-utils bind-tools tzdata \
+RUN apk add --no-cache --virtual .run-deps gettext jq bash tini curl knot-utils bind-tools tzdata docker-cli \
     && mkdir -p ${HOME_DIR}/jobs ${HOME_DIR}/projects \
+    && (delgroup ping || true) \
     && addgroup -g 999 docker \
     && adduser -G docker -D -S docker \
     && adduser -D -h ${HOME_DIR} appuser \
     && chown -R appuser:appuser ${HOME_DIR} \
     && cp -r -f /usr/share/zoneinfo/${TZ} /etc/localtime \
-    && chmod 755 /var/run/docker.sock 2>/dev/null || true
+    && (chmod 755 /var/run/docker.sock 2>/dev/null || true)
 
 COPY docker-entrypoint /
 ENTRYPOINT ["/sbin/tini", "--", "/docker-entrypoint"]

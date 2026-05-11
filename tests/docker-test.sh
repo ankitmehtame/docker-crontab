@@ -8,14 +8,36 @@ else
   echo "Docker socket /var/run/docker.sock not found; using default Docker host"
 fi
 
+# Determine repository root dynamically FIRST, as it's used by subsequent logic
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
 IMAGE_TAG=${1:-docker-crontab-test}
-IMAGE=${IMAGE_TAG}
+if [ "$#" -gt 0 ]; then shift; fi # Remove IMAGE_TAG from arguments, process the rest
+CONFIG_ARG=""
+CONFIG_FILE_HOST="$REPO_ROOT/config-samples/config.sample.json" # Default config
+
+# Parse remaining arguments for flags
+while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+        --minimal)
+            CONFIG_ARG="$1" # Store the flag
+            CONFIG_FILE_HOST="$REPO_ROOT/config-samples/config.minimal.json"
+            echo "Using minimal config: $CONFIG_FILE_HOST"
+            shift # past argument
+            ;;
+        *)    # unknown option
+            echo "Unknown parameter passed: $1"
+            exit 1
+            ;;
+    esac
+done
+
 
 cleanup() {
   echo 'Cleaning up...'
   # Ensure container is removed even if it failed to start or is stuck
   docker rm -f cron-test >/dev/null 2>&1 || true
-  docker rmi "$IMAGE" >/dev/null 2>&1 || true
+  docker rmi "$IMAGE_TAG" >/dev/null 2>&1 || true
   echo 'Cleanup complete.'
 }
 
@@ -28,16 +50,17 @@ docker rm -f cron-test >/dev/null 2>&1 || true
 sleep 2
 
 # Build image
-printf 'Building image %s...\n' "$IMAGE"
-docker build -t "$IMAGE" .
+printf 'Building image %s...\n' "$IMAGE_TAG"
+docker build -t "$IMAGE_TAG" .
 
-# Run container in background with sample config mounted AND docker socket mounted
+# Run container
 printf 'Running container with config...\n'
-# Determine repository root dynamically to make path resolvable in CI
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CONFIG_FILE_HOST="$REPO_ROOT/config-samples/config.sample.json"
 CONFIG_FILE_CONTAINER=/opt/crontab/config.json
-docker run -d --name cron-test --cap-add SYS_ADMIN --cap-add SYS_TIME -v "${CONFIG_FILE_HOST}:${CONFIG_FILE_CONTAINER}" -v /var/run/docker.sock:/var/run/docker.sock "$IMAGE"
+
+# Default docker run command
+DOCKER_RUN_CMD="docker run -d --name cron-test --cap-add SYS_ADMIN --cap-add SYS_TIME"
+
+$DOCKER_RUN_CMD -v "${CONFIG_FILE_HOST}:${CONFIG_FILE_CONTAINER}" -v /var/run/docker.sock:/var/run/docker.sock "$IMAGE_TAG"
 
 # Wait for container to be Running (60s max)
 waited=0
@@ -63,7 +86,7 @@ fi
 
 # Wait additional time for crontab to be built
 echo "Waiting for crontab to be built..."
-sleep 5
+sleep 10 # Increased sleep duration
 
 # Verify config file exists inside the container
 echo "Verifying config file exists at ${CONFIG_FILE_CONTAINER}..."
@@ -91,25 +114,28 @@ fi
 # Verify cron jobs are loaded from config
 echo "Verifying cron jobs by listing crontab entries..."
 
-# Check that 6 crontab entries exist
+# Determine expected number of cron jobs from config
+EXPECTED_CRON_JOBS=$(jq -r '. | length' "$CONFIG_FILE_HOST")
+
+# Check that the expected number of crontab entries exist (excluding comments)
 CRON_ENTRY_COUNT=$(docker exec cron-test grep -c "^[^#]" /etc/crontabs/docker)
-echo "Found $CRON_ENTRY_COUNT cron entries (excluding comments)"
+echo "Found ${CRON_ENTRY_COUNT} cron entries (excluding comments); expected ${EXPECTED_CRON_JOBS}"
 
 # For debugging, show the crontab content
 echo "Actual crontab output from /etc/crontabs/docker:"
 docker exec cron-test cat /etc/crontabs/docker
 
-if [ "$CRON_ENTRY_COUNT" -eq 6 ]; then
-  echo "✓ All 6 cron jobs are present in the crontab"
+if [ "$CRON_ENTRY_COUNT" -eq "$EXPECTED_CRON_JOBS" ]; then
+  echo "✓ All ${EXPECTED_CRON_JOBS} cron jobs are present in the crontab"
 else
-  echo "✗ Expected 6 cron jobs, found $CRON_ENTRY_COUNT"
+  echo "✗ Expected ${EXPECTED_CRON_JOBS} cron jobs, found ${CRON_ENTRY_COUNT}"
   exit 1
 fi
 
 # Verify that wrapper scripts contain the expected commands
 echo ""
 echo "Verifying wrapper scripts contain expected commands..."
-EXPECTED_COMMANDS=$(jq -r '.[].command' "$REPO_ROOT/config-samples/config.sample.json")
+EXPECTED_COMMANDS=$(jq -r '.[].command' "$CONFIG_FILE_HOST") # Use the correct config file based on flag
 JOB_CHECK_PASSED=true
 
 # Get job and project script contents from the container
@@ -137,7 +163,7 @@ while IFS= read -r CMD; do
     if echo "$ALL_SCRIPTS" | grep -qF "$CORE_CMD"; then
       echo "✓ Found command in script: '$CMD'"
     else
-      echo "✗ Command not found in scripts: '$CMD'"
+      echo "✗ Command not found in scripts: '$CORE_CMD'"
       JOB_CHECK_PASSED=false
     fi
   fi
@@ -145,9 +171,38 @@ done <<< "$EXPECTED_COMMANDS"
 
 if [ "$JOB_CHECK_PASSED" = false ]; then
   echo "Cron job verification failed. Some expected jobs or crond loading issue."
+  echo "Dumping container logs for debugging..."
+  docker logs cron-test || true
   exit 1
 else
   echo "Cron job verification passed. Detected expected job commands in crontab."
 fi
 
-# Cleanup is handled by trap EXIT
+# Extra concrete verification: ensure the test log write cron actually executed at least once via container logs...
+echo ""
+echo "Verifying that the test log write cron actually executed at least once via container logs..."
+LOG_CHECK_TIMEOUT=120 # Increased timeout to ensure cron has time to run and its output is captured
+LOG_CHECK_INTERVAL=5
+ELAPSED=0
+LOG_LINE=""
+
+# Wait for the log file to appear and contain output
+while [ $ELAPSED -lt $LOG_CHECK_TIMEOUT ]; do
+  CONTAINER_LOGS=$(docker logs cron-test 2>/dev/null || echo "log_capture_failed")
+  if echo "$CONTAINER_LOGS" | grep -qE 'cron-output-'; then
+    LOG_LINE=$(echo "$CONTAINER_LOGS" | grep 'cron-output-') # Capture the specific log line
+    break
+  fi
+  sleep $LOG_CHECK_INTERVAL
+  ELAPSED=$((ELAPSED+LOG_CHECK_INTERVAL))
+done
+
+# Check if log line was found
+if echo "$LOG_LINE" | grep -qE 'cron-output-'; then
+  echo "✓ Detected cron output in container logs: $LOG_LINE"
+else
+  echo "✗ No cron output detected in container logs after waiting ${LOG_CHECK_TIMEOUT}s."
+  echo "Container logs:"
+  docker logs cron-test 2>/dev/null || echo "Log capture failed."
+  exit 1
+fi
