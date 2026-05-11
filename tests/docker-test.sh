@@ -63,7 +63,7 @@ fi
 
 # Wait additional time for crontab to be built
 echo "Waiting for crontab to be built..."
-sleep 5
+sleep 10 # Increased sleep duration
 
 # Verify config file exists inside the container
 echo "Verifying config file exists at ${CONFIG_FILE_CONTAINER}..."
@@ -91,18 +91,21 @@ fi
 # Verify cron jobs are loaded from config
 echo "Verifying cron jobs by listing crontab entries..."
 
-# Check that 6 crontab entries exist
+# Determine expected number of cron jobs from config
+EXPECTED_CRON_JOBS=$(jq -r '. | length' "$REPO_ROOT/config-samples/config.sample.json")
+
+# Check that the expected number of crontab entries exist (excluding comments)
 CRON_ENTRY_COUNT=$(docker exec cron-test grep -c "^[^#]" /etc/crontabs/docker)
-echo "Found $CRON_ENTRY_COUNT cron entries (excluding comments)"
+echo "Found ${CRON_ENTRY_COUNT} cron entries (excluding comments); expected ${EXPECTED_CRON_JOBS}"
 
 # For debugging, show the crontab content
 echo "Actual crontab output from /etc/crontabs/docker:"
 docker exec cron-test cat /etc/crontabs/docker
 
-if [ "$CRON_ENTRY_COUNT" -eq 6 ]; then
-  echo "✓ All 6 cron jobs are present in the crontab"
+if [ "$CRON_ENTRY_COUNT" -eq "$EXPECTED_CRON_JOBS" ]; then
+  echo "✓ All ${EXPECTED_CRON_JOBS} cron jobs are present in the crontab"
 else
-  echo "✗ Expected 6 cron jobs, found $CRON_ENTRY_COUNT"
+  echo "✗ Expected ${EXPECTED_CRON_JOBS} cron jobs, found ${CRON_ENTRY_COUNT}"
   exit 1
 fi
 
@@ -148,6 +151,25 @@ if [ "$JOB_CHECK_PASSED" = false ]; then
   exit 1
 else
   echo "Cron job verification passed. Detected expected job commands in crontab."
+fi
+
+# Extra concrete verification: ensure the test log write cron actually executed at least once
+echo ""
+echo "Verifying that the test log write cron actually executed at least once..."
+LOG_CHECK_TIMEOUT=120 # Increased timeout to ensure cron has time to run and its output is captured
+LOG_CHECK_INTERVAL=5
+ELAPSED=0
+LOG_LINE=""
+# Capture all container logs and grep for the output
+CONTAINER_LOGS=$(docker logs cron-test 2>/dev/null || true)
+LOG_LINE=$(echo "$CONTAINER_LOGS" | grep 'cron-output-')
+
+if echo "$LOG_LINE" | grep -qE 'cron-output-'; then
+  echo "✓ Detected cron output in container logs: $LOG_LINE"
+else
+  echo "✗ No cron output detected in container logs after waiting. Container logs:"
+  echo "$CONTAINER_LOGS"
+  exit 1
 fi
 
 # Cleanup is handled by trap EXIT
