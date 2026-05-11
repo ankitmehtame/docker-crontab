@@ -13,6 +13,7 @@ if [ "${LOG_FILE}" == "" ]; then
 		LOG_FILE=${LOG_DIR}/jobs.log
 		mkdir -p ${LOG_DIR}
 		touch ${LOG_FILE}
+		chmod 666 ${LOG_FILE}
 fi
 
 get_config() {
@@ -36,23 +37,23 @@ mkdir -p ${HOME_DIR}/jobs ${HOME_DIR}/projects
 ensure_docker_socket_accessible() {
 		# Check if docker socket exists and is accessible
 		if [ -S "${DOCKER_SOCK}" ]; then
-				if ! grep -q "^docker:" /etc/group; then
-						# Ensure 'docker' user has permissions for docker socket (without changing permissions)
-						DOCKER_GID=$(stat -c '%g' ${DOCKER_SOCK} 2>/dev/null || echo "0")
-						if [ "${DOCKER_GID}" != "0" ]; then
-								if ! grep -qE "^[^:]+:[^:]+:${DOCKER_GID}:" /etc/group; then
-										# No group with such gid exists - create group docker
-										addgroup -g ${DOCKER_GID} docker 2>/dev/null || true
-										adduser docker docker 2>/dev/null || true
-								else
-										# Group with such gid exists - add user "docker" to this group
-										DOCKER_GROUP_NAME=$(getent group "${DOCKER_GID}" | awk -F':' '{{ print $1 }}' || echo "docker")
-										adduser docker $DOCKER_GROUP_NAME 2>/dev/null || true
-								fi
+				# Ensure docker user exists just in case
+				id -u docker >/dev/null 2>&1 || adduser -S docker -D 2>/dev/null || true
+				
+				DOCKER_GID=$(stat -c '%g' ${DOCKER_SOCK} 2>/dev/null || echo "0")
+				if [ "${DOCKER_GID}" != "0" ]; then
+						if ! grep -qE "^[^:]+:[^:]+:${DOCKER_GID}:" /etc/group; then
+								# No group with such gid exists - create group docker_sock
+								addgroup -g ${DOCKER_GID} docker_sock 2>/dev/null || true
+								adduser docker docker_sock 2>/dev/null || true
 						else
-								# Docker socket belongs to "root" group - add user "docker" to this group
-								adduser docker root 2>/dev/null || true
+								# Group with such gid exists - add user "docker" to this group
+								DOCKER_GROUP_NAME=$(getent group "${DOCKER_GID}" | awk -F':' '{ print $1 }' || echo "docker")
+								adduser docker $DOCKER_GROUP_NAME 2>/dev/null || true
 						fi
+				else
+						# Docker socket belongs to "root" group - add user "docker" to this group
+						adduser docker root 2>/dev/null || true
 				fi
 		else
 				echo "Docker socket not found at ${DOCKER_SOCK}, skipping docker group setup"
